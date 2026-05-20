@@ -257,4 +257,23 @@ pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRustString
         let idx = i * 6;
         slice_u8[idx..idx + 6].copy_from_slice(&string_fixa.0);
     }
+    
+// Função para o teste simples do usuário (Main.java)
+#[no_mangle]
+pub extern "system" fn Java_org_multimerge_Main_multiMergeRust<'local>(
+    mut env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    input: jni::objects::JIntArray<'local>,
+) {
+    let mut elements = unsafe {
+        env.get_array_elements_critical(&input, jni::objects::ReleaseMode::CopyBack)
+            .expect("Erro ao obter elementos do array")
+    };
+
+    let slice: &mut [i32] = unsafe {
+        std::slice::from_raw_parts_mut(elements.as_mut_ptr() as *mut i32, elements.len())
+    };
+
+    ordenar_multi_merge(slice);
+}
 }

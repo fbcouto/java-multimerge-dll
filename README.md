@@ -76,7 +76,18 @@ multimerge-Java-dll/
 ```
 
 ---
+## 🚀 Quick Start Example
+To verify your installation, you can run the following simple test:
 
+```bash
+# Compile and run
+javac -d target/classes src/main/java/org/multimerge/Main.java
+java --enable-native-access=ALL-UNNAMED "-Djava.library.path=target/release" -cp "target/classes" org.multimerge.Main
+
+# Expected Output:
+# 1 2 5 8 9
+```
+---
 # 📜 License
 
 This project is licensed under the Apache License, Version 2.0.
