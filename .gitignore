@@ -1,0 +1,20 @@
+# Rust
+/target/
+Cargo.lock
+
+# Java
+*.class
+*.jar
+*.csv
+
+# Artefatos Nativos
+*.dll
+*.so
+*.exp
+*.lib
+
+# Sistema/IDE
+.vs/
+.idea/
+.vscode/
+.DS_Store
