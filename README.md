@@ -69,8 +69,8 @@ multimerge-Java-dll/
 │   │   └── java\
 │   │       └── org\
 │   │           └── multimerge\
-│   │               └── JmhSortBenchmark.java   <-- Seu Java vai AQUI
-│   └── lib.rs                                  <-- Seu Rust continua AQUI
+│   │               └── JmhSortBenchmark.java   <-- Java code
+│   └── lib.rs                                  <-- Rust code
 ├── pom.xml
 ├── Cargo.toml
 ```
