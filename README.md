@@ -41,7 +41,7 @@ Both Rust engines were compared against Java's standard sorting utilities using 
 - **Reverse:** strictly descending.
 - **Sawtooth:** sorted, then every odd block out of 1,000 reversed. Each tooth sits in its own disjoint value range.
 
-Average time per sort, in milliseconds; lower is better. The best result in each column is in bold.
+Average time per sort, in milliseconds; lower is better. The best result in each column is in large bold blue (rendered by GitHub's math extension; other Markdown viewers may show the raw `\color` markup).
 
 ### 1M integers
 
@@ -49,7 +49,7 @@ Average time per sort, in milliseconds; lower is better. The best result in each
 | :--- | ---: | ---: | ---: | ---: |
 | Java `Arrays.sort` | 89.0 | 0.41 | 1.09 | 11.0 |
 | Java `Arrays.parallelSort` | 24.2 | 0.46 | 1.13 | 4.17 |
-| Rust Multimerge | **9.94** | **0.31** | **0.71** | **0.56** |
+| Rust Multimerge | ${\color{blue}\Large\textbf{9.94}}$ | ${\color{blue}\Large\textbf{0.31}}$ | ${\color{blue}\Large\textbf{0.71}}$ | ${\color{blue}\Large\textbf{0.56}}$ |
 | Rust Multimerge_Stable | 11.7 | 0.32 | 1.41 | 0.57 |
 
 ### 10M integers
@@ -58,7 +58,7 @@ Average time per sort, in milliseconds; lower is better. The best result in each
 | :--- | ---: | ---: | ---: | ---: |
 | Java `Arrays.sort` | 1079.3 | 3.51 | 10.5 | 95.8 |
 | Java `Arrays.parallelSort` | 285.1 | 3.75 | 10.5 | 46.7 |
-| Rust Multimerge | **113.3** | **1.93** | **7.80** | **4.88** |
+| Rust Multimerge | ${\color{blue}\Large\textbf{113.3}}$ | ${\color{blue}\Large\textbf{1.93}}$ | ${\color{blue}\Large\textbf{7.80}}$ | ${\color{blue}\Large\textbf{4.88}}$ |
 | Rust Multimerge_Stable | 129.7 | 1.98 | 11.3 | 5.00 |
 
 ### 30M integers
@@ -67,7 +67,7 @@ Average time per sort, in milliseconds; lower is better. The best result in each
 | :--- | ---: | ---: | ---: | ---: |
 | Java `Arrays.sort` | 3258.3 | 11.4 | 31.6 | 294.3 |
 | Java `Arrays.parallelSort` | 907.2 | 11.8 | 32.3 | 149.7 |
-| Rust Multimerge | **340.9** | **5.11** | **17.5** | **11.0** |
+| Rust Multimerge | ${\color{blue}\Large\textbf{340.9}}$ | ${\color{blue}\Large\textbf{5.11}}$ | ${\color{blue}\Large\textbf{17.5}}$ | ${\color{blue}\Large\textbf{11.0}}$ |
 | Rust Multimerge_Stable | 422.3 | 5.20 | 32.9 | 13.1 |
 
 ### Key Takeaways:
