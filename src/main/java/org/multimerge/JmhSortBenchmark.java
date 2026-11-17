@@ -36,6 +36,7 @@ public class JmhSortBenchmark {
     }
 
     public static native void multiMergeRust(int[] array);
+    public static native void multiMergeRustStable(int[] array);
 
     // O JMH vai rodar cruzando estes parâmetros (2 tamanhos x 4 distribuições = 8 cenários)
     @Param({"1000000", "10000000"})
@@ -107,11 +108,19 @@ public class JmhSortBenchmark {
         Arrays.parallelSort(arrayToSort);
     }
 
+    // Multimerge: NAO estavel, o padrao.
     @Benchmark
     public void rustMultiMergeSort() {
         multiMergeRust(arrayToSort);
     }
-    
+
+    // Multimerge_Stable. Com int[] o resultado e identico ao do instavel; o
+    // que este competidor mede e o custo de preservar a ordem dos iguais.
+    @Benchmark
+    public void rustMultiMergeStableSort() {
+        multiMergeRustStable(arrayToSort);
+    }
+
     @Benchmark
     public void javaSequentialSort() {
     Arrays.sort(arrayToSort);

@@ -1,216 +1,44 @@
-use rayon::prelude::*;
+// Biblioteca nativa JNI do MultiMerge.
+//
+// O motor esta em `multimerge.rs`, copia de
+// adaptive-parallel-multimerge-sort/src/multimerge.rs. Ele substitui o motor
+// que morava neste arquivo (Timsort + merge paralelo). O que muda para quem
+// chama do Java:
+//
+//   multiMergeRust / multiMergeRustStrings              Multimerge, NAO estavel
+//   multiMergeRustStable / multiMergeRustStringsStable  Multimerge_Stable
+//
+// Com `int[]` e com texto de largura fixa, dois elementos iguais sao
+// indistinguiveis: os dois motores devolvem exatamente o mesmo array, e a
+// diferenca entre eles e so de tempo.
+pub mod multimerge;
 
-// ==========================================
-// 1. UTILITÁRIOS GENÉRICOS
-// ==========================================
+use jni::objects::{JByteArray, JClass, JIntArray, ReleaseMode};
+use jni::JNIEnv;
 
-fn calcular_minrun(mut n: usize) -> usize {
-    let mut r = 0;
-    while n >= 64 {
-        r |= n & 1;
-        n >>= 1;
-    }
-    n + r
+/// Multimerge: NAO estavel. E o padrao.
+pub fn ordenar_multi_merge<T: Ord + Copy + Send + Sync>(arr: &mut [T]) {
+    multimerge::multi_merge_sort(arr);
 }
 
-fn detectar_tendencia_global<T: Ord + Sync>(arr: &mut [T]) -> bool {
-    let n = arr.len();
-    if n < 100_000 { return false; } 
-
-    let chunk_size = 32768; 
-    let qtd_blocos = (n + chunk_size - 1) / chunk_size;
-    let arr_imutavel: &[T] = arr;
-
-    // ========================================================
-    // O MAP-REDUCE: Agora rastreia tanto subidas quanto descidas
-    // ========================================================
-    let (subindo, descendo) = (0..qtd_blocos)
-        .into_par_iter()
-        .map(|i| {
-            let inicio = i * chunk_size;
-            let fim = std::cmp::min(inicio + chunk_size + 1, n);
-            let chunk_sobreposto = &arr_imutavel[inicio..fim];
-
-            let mut asc = 0;
-            let mut desc = 0;
-
-            for j in 1..chunk_sobreposto.len() {
-                if chunk_sobreposto[j - 1] < chunk_sobreposto[j] {
-                    asc += 1; // Degrau subindo
-                } else if chunk_sobreposto[j - 1] > chunk_sobreposto[j] {
-                    desc += 1; // Degrau descendo
-                }
-            }
-            
-            // A thread retorna uma tupla com as duas contagens
-            (asc, desc) 
-        })
-        // O Reduce soma as tuplas de todas as threads (a.0 + b.0, a.1 + b.1)
-        .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1)); 
-
-    // ========================================================
-    // TOMADA DE DECISÃO COM CERTEZA ABSOLUTA
-    // ========================================================
-
-    // 1. Array Ordenado (Nenhum degrau descendo, imune a repetidos)
-    if descendo == 0 {
-        return true; 
-    }
-
-    // 2. Array Invertido (Nenhum degrau subindo, imune a repetidos)
-    if subindo == 0 {
-        arr.reverse();
-        return true;
-    }
-
-    // 3. O Dente de Serra (Sawtooth com precisão absoluta)
-    // Apenas descidas muito raras (menos de 5% do array)
-    if descendo > 0 && descendo < (n / 20) {
-        return false; 
-    }
-
-    // 4. Caos Total
-    false
-}
-// ==========================================
-// 2. MOTOR PRINCIPAL ADAPTATIVO (ATUALIZADO)
-// ==========================================
-
-pub fn ordenar_multi_merge<T: Ord + Clone + Send + Sync>(arr: &mut [T]) {
-    let n = arr.len();
-    if n < 1024 {
-        arr.sort_unstable(); // <- SOLUÇÃO 1
-        return;
-    }
-    
-    // 1. Intercepta ordenações perfeitas ou inversas em O(n)
-    if detectar_tendencia_global(arr) { return; }
-
-    // 2. HEURÍSTICA DE OSCILAÇÃO (Detecção Real de Caos)
-    let mut e_caos_puro = false;
-    if n > 120 {
-        let mid = n / 2;
-        let mut mudancas_direcao = 0;
-        let mut subindo = arr[mid] <= arr[mid + 1];
-        
-        // Analisa uma janela de 100 elementos no meio do array
-        for i in (mid + 1)..(mid + 100).min(n - 1) {
-            let direcao_atual = arr[i] <= arr[i + 1];
-            if direcao_atual != subindo {
-                mudancas_direcao += 1;
-                subindo = direcao_atual;
-            }
-        }
-        
-        // Se a tendência mudar mais de 15 vezes em 100 elementos, é caos puro
-        if mudancas_direcao > 15 {
-            e_caos_puro = true;
-        }
-    }
-
-    if !e_caos_puro {
-        // ROTA A: Seu Multimerge original estável (Timsort + Merge Paralelo) para dados estruturados
-        let mut buffer = vec![arr[0].clone(); n];
-        let num_threads = rayon::current_num_threads();
-        let threshold = (n / num_threads).max(1_000_000); 
-        sort_recursivo_paralelo(arr, &mut buffer, threshold);
-    } else {
-        // ROTA B: BlockQuicksort paralelo in-place do Rayon para triturar o caos puro
-        arr.par_sort_unstable();
-    }
+/// Multimerge_Stable: preserva a ordem relativa de chaves iguais.
+pub fn ordenar_multi_merge_estavel<T: Ord + Copy + Send + Sync>(arr: &mut [T]) {
+    multimerge::multi_merge_sort_stable(arr);
 }
 
 // ==========================================
-// 3. NÚCLEO PROCESSADOR DO MULTIMERGE (ROTA A)
+// CAMADA DE INTERFACE JNI (JAVA)
 // ==========================================
 
-fn ordenar_sequencial_timsort_style<T: Ord + Clone>(arr: &mut [T], buffer: &mut [T]) {
-    let n = arr.len();
-    let minrun = calcular_minrun(n);
-
-    for i in (0..n).step_by(minrun) {
-        let end = (i + minrun).min(n);
-        arr[i..end].sort_unstable(); // <- SOLUÇÃO 2
-    }
-
-    let mut tamanho_bloco = minrun;
-    while tamanho_bloco < n {
-        for esq in (0..n).step_by(tamanho_bloco * 2) {
-            let meio = (esq + tamanho_bloco).min(n);
-            let dir = (esq + tamanho_bloco * 2).min(n);
-            if meio < dir {
-                mesclar_estavel(&mut arr[esq..dir], buffer, meio - esq);
-            }
-        }
-        tamanho_bloco *= 2;
-    }
-}
-
-fn sort_recursivo_paralelo<T: Ord + Clone + Send>(arr: &mut [T], buffer: &mut [T], threshold: usize) {
-    let n = arr.len();
-
-    if n <= threshold {
-        ordenar_sequencial_timsort_style(arr, buffer);
-        return;
-    }
-
-    let meio = n / 2;
-    let (arr_esq, arr_dir) = arr.split_at_mut(meio);
-    let (buf_esq, buf_dir) = buffer.split_at_mut(meio);
-
-    rayon::join(
-        || sort_recursivo_paralelo(arr_esq, buf_esq, threshold),
-        || sort_recursivo_paralelo(arr_dir, buf_dir, threshold),
-    );
-
-    mesclar_estavel(arr, buffer, meio);
-}
-
-fn mesclar_estavel<T: Ord + Clone>(arr: &mut [T], buffer: &mut [T], meio: usize) {
-    let n = arr.len();
-    buffer[..n].clone_from_slice(&arr[..n]);
-
-    let mut i = 0;
-    let mut j = meio;
-    let mut k = 0;
-
-    while i < meio && j < n {
-        if buffer[i] <= buffer[j] {
-            arr[k] = buffer[i].clone();
-            i += 1;
-        } else {
-            arr[k] = buffer[j].clone();
-            j += 1;
-        }
-        k += 1;
-    }
-
-    if i < meio {
-        arr[k..k + (meio - i)].clone_from_slice(&buffer[i..meio]);
-    } else if j < n {
-        arr[k..k + (n - j)].clone_from_slice(&buffer[j..n]);
-    }
-}
-// ==========================================
-// MÓDULO JNI (INTERFACE COM O JAVA)
-// ==========================================
-
-// Estrutura estática para texto em flat bytes (6 bytes fixos)
+// Estrutura estatica para texto em flat bytes (6 bytes fixos)
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct StringFixa(pub [u8; 6]);
-unsafe impl Send for StringFixa {}
 
-// 1. Função Numérica Otimizada
-#[no_mangle]
-pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRust<'local>(
-    mut env: jni::JNIEnv<'local>,
-    _class: jni::objects::JClass<'local>,
-    input: jni::objects::JIntArray<'local>,
-) {
-    // Obtém o ponteiro crítico bloqueando o Garbage Collector (Zero-Copy)
+fn ordenar_ints(env: &mut JNIEnv, input: &JIntArray, estavel: bool) {
+    // Ponteiro critico: bloqueia o Garbage Collector e evita a copia.
     let mut elements = unsafe {
-        env.get_array_elements_critical(&input, jni::objects::ReleaseMode::CopyBack)
+        env.get_array_elements_critical(input, ReleaseMode::CopyBack)
             .expect("Erro ao obter elementos do array Java")
     };
 
@@ -218,28 +46,21 @@ pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRust<'loca
         std::slice::from_raw_parts_mut(elements.as_mut_ptr() as *mut i32, elements.len())
     };
 
-    // Chama o motor core
-    ordenar_multi_merge(slice);
+    if estavel {
+        ordenar_multi_merge_estavel(slice);
+    } else {
+        ordenar_multi_merge(slice);
+    }
 }
 
-// 2. Função Textual Otimizada
-#[no_mangle]
-pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRustStrings<'local>(
-    mut env: jni::JNIEnv<'local>,
-    _class: jni::objects::JClass<'local>,
-    input: jni::objects::JByteArray<'local>,
-) {
+fn ordenar_strings(env: &mut JNIEnv, input: &JByteArray, estavel: bool) {
     let mut elements = unsafe {
-        env.get_array_elements_critical(&input, jni::objects::ReleaseMode::CopyBack)
+        env.get_array_elements_critical(input, ReleaseMode::CopyBack)
             .expect("Erro ao obter elementos do array de bytes do Java")
     };
 
-    let slice_i8: &mut [i8] = unsafe {
-        std::slice::from_raw_parts_mut(elements.as_mut_ptr() as *mut i8, elements.len())
-    };
-
     let slice_u8: &mut [u8] = unsafe {
-        std::slice::from_raw_parts_mut(slice_i8.as_mut_ptr() as *mut u8, slice_i8.len())
+        std::slice::from_raw_parts_mut(elements.as_mut_ptr() as *mut u8, elements.len())
     };
 
     let mut vetor_strings: Vec<StringFixa> = slice_u8
@@ -251,29 +72,134 @@ pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRustString
         })
         .collect();
 
-    ordenar_multi_merge(&mut vetor_strings);
+    if estavel {
+        ordenar_multi_merge_estavel(&mut vetor_strings);
+    } else {
+        ordenar_multi_merge(&mut vetor_strings);
+    }
 
     for (i, string_fixa) in vetor_strings.iter().enumerate() {
         let idx = i * 6;
         slice_u8[idx..idx + 6].copy_from_slice(&string_fixa.0);
     }
-    
-// Função para o teste simples do usuário (Main.java)
+}
+
+// ---- org.multimerge.JmhSortBenchmark
+
+#[no_mangle]
+pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRust<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    input: JIntArray<'local>,
+) {
+    ordenar_ints(&mut env, &input, false);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRustStable<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    input: JIntArray<'local>,
+) {
+    ordenar_ints(&mut env, &input, true);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRustStrings<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    input: JByteArray<'local>,
+) {
+    ordenar_strings(&mut env, &input, false);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_multimerge_JmhSortBenchmark_multiMergeRustStringsStable<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    input: JByteArray<'local>,
+) {
+    ordenar_strings(&mut env, &input, true);
+}
+
+// ---- org.multimerge.Main (teste simples do usuario)
+
 #[no_mangle]
 pub extern "system" fn Java_org_multimerge_Main_multiMergeRust<'local>(
-    mut env: jni::JNIEnv<'local>,
-    _class: jni::objects::JClass<'local>,
-    input: jni::objects::JIntArray<'local>,
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    input: JIntArray<'local>,
 ) {
-    let mut elements = unsafe {
-        env.get_array_elements_critical(&input, jni::objects::ReleaseMode::CopyBack)
-            .expect("Erro ao obter elementos do array")
-    };
-
-    let slice: &mut [i32] = unsafe {
-        std::slice::from_raw_parts_mut(elements.as_mut_ptr() as *mut i32, elements.len())
-    };
-
-    ordenar_multi_merge(slice);
+    ordenar_ints(&mut env, &input, false);
 }
+
+#[no_mangle]
+pub extern "system" fn Java_org_multimerge_Main_multiMergeRustStable<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    input: JIntArray<'local>,
+) {
+    ordenar_ints(&mut env, &input, true);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lcg(s: &mut u64) -> u64 {
+        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *s >> 11
+    }
+
+    /// As quatro distribuicoes do JmhSortBenchmark, nos dois motores.
+    #[test]
+    fn distribuicoes_do_benchmark() {
+        let n = 1_000_000usize;
+        let mut s = 42u64;
+        let aleatorio: Vec<i32> = (0..n).map(|_| lcg(&mut s) as i32).collect();
+        let mut ordenado = aleatorio.clone();
+        ordenado.sort();
+        let invertido: Vec<i32> = ordenado.iter().rev().copied().collect();
+        // SAWTOOTH do benchmark: ordenado, com os blocos impares invertidos.
+        let mut serra = ordenado.clone();
+        let bloco = n / 1000;
+        for d in (1..1000).step_by(2) {
+            serra[d * bloco..(d + 1) * bloco].reverse();
+        }
+        for (nome, dado) in [
+            ("RANDOM", &aleatorio),
+            ("SORTED", &ordenado),
+            ("REVERSE", &invertido),
+            ("SAWTOOTH", &serra),
+        ] {
+            let (mut a, mut b) = (dado.clone(), dado.clone());
+            ordenar_multi_merge(&mut a);
+            ordenar_multi_merge_estavel(&mut b);
+            assert!(a == ordenado, "{nome}: Multimerge");
+            assert!(b == ordenado, "{nome}: Multimerge_Stable");
+        }
+    }
+
+    #[test]
+    fn texto_de_largura_fixa() {
+        let mut s = 7u64;
+        for n in [0usize, 1, 5, 4097, 300_000] {
+            let textos: Vec<StringFixa> = (0..n)
+                .map(|_| {
+                    let mut t = [0u8; 6];
+                    for c in t.iter_mut() {
+                        *c = b'A' + (lcg(&mut s) % 4) as u8;
+                    }
+                    StringFixa(t)
+                })
+                .collect();
+            let mut esperado = textos.clone();
+            esperado.sort();
+            let (mut a, mut b) = (textos.clone(), textos.clone());
+            ordenar_multi_merge(&mut a);
+            ordenar_multi_merge_estavel(&mut b);
+            assert!(a == esperado, "Multimerge, n={n}");
+            assert!(b == esperado, "Multimerge_Stable, n={n}");
+        }
+    }
 }

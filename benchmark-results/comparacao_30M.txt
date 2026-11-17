@@ -1,0 +1,17 @@
+bench                     dist          size      run1      +-      run2      +-   dif%
+javaParallelSort          RANDOM    30000000   964.122 320.633   907.162 133.472     -6
+javaSequentialSort        RANDOM    30000000  3445.069 2080.388  3258.252 940.965     -5
+rustMultiMergeSort        RANDOM    30000000   339.540  60.144   340.880  58.716      0
+rustMultiMergeStableSort  RANDOM    30000000   422.331  29.179   424.638  36.423      1
+javaParallelSort          REVERSE   30000000    32.348   8.612    35.157  12.186      9
+javaSequentialSort        REVERSE   30000000    45.627  91.968    31.623   7.335    -31
+rustMultiMergeSort        REVERSE   30000000    20.993  18.386    17.463   1.294    -17
+rustMultiMergeStableSort  REVERSE   30000000    32.866   6.922    42.429  86.215     29
+javaParallelSort          SAWTOOTH  30000000   160.604  31.183   149.686   2.757     -7
+javaSequentialSort        SAWTOOTH  30000000   323.800 158.112   294.279  87.885     -9
+rustMultiMergeSort        SAWTOOTH  30000000    10.997   0.380    11.836   2.418      8
+rustMultiMergeStableSort  SAWTOOTH  30000000    14.469   3.658    13.128   0.925     -9
+javaParallelSort          SORTED    30000000    11.789   2.490    11.168   3.478     -5
+javaSequentialSort        SORTED    30000000    11.408   1.985    11.284   3.200     -1
+rustMultiMergeSort        SORTED    30000000     5.113   0.219     5.349   1.435      5
+rustMultiMergeStableSort  SORTED    30000000     5.203   0.365     5.104   0.392     -2
